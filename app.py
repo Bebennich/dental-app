@@ -13,13 +13,16 @@ from pytorch_grad_cam.utils.image import show_cam_on_image
 from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
 
 # ==========================================
-# 1. KONFIGURASI HALAMAN STREAMLIT
+# 1. KONFIGURASI HALAMAN & DEVICE GLOBAL
 # ==========================================
 st.set_page_config(
     page_title="Dental X-Ray Biometrics",
     page_icon="🦷",
     layout="wide"
 )
+
+# Tentukan device secara global agar bisa diakses di mana saja
+device = torch.device("cpu")
 
 st.markdown("""
     <style>
@@ -71,14 +74,13 @@ def load_model():
                 out["age_norm"] = self.age_head(feat).squeeze(-1)
             return out
 
-    device = torch.device("cpu")
     model = MultiTaskNet(backbone_name="legacy_xception", task_mode="multi", pretrained=False)
     
     try:
         state_dict = torch.load("best_model.pth", map_location=device)
         model.load_state_dict(state_dict)
         model.eval()
-        return model, device
+        return model, None
     except Exception as e:
         return None, str(e)
 
