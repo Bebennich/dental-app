@@ -7,6 +7,9 @@ import numpy as np
 import timm
 import albumentations as A
 import gc
+import hashlib
+import io
+import traceback
 
 from PIL import Image
 from albumentations.pytorch import ToTensorV2
@@ -17,25 +20,37 @@ from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
 
 
 # =========================================================
-# 1. KONFIGURASI APLIKASI
+# 1. KONFIGURASI STREAMLIT
 # =========================================================
 
 st.set_page_config(
     page_title="Xception Dental AI",
     page_icon="🦷",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
 MODEL_PATH = "best_model.pth"
-IMAGE_SIZE = (384, 768)
+
+IMAGE_HEIGHT = 384
+IMAGE_WIDTH = 768
 AGE_MAX = 100.0
+
+# Membatasi thread CPU agar penggunaan resource lebih terkontrol.
+torch.set_num_threads(2)
+
+try:
+    torch.set_num_interop_threads(1)
+except RuntimeError:
+    pass
 
 
 # =========================================================
-# 2. ARSITEKTUR MODEL XCEPTION MULTI-TASK
+# 2. ARSITEKTUR XCEPTION MULTI-TASK
 # =========================================================
 
 def make_head(in_features):
+
     return nn.Sequential(
         nn.Linear(in_features, 256),
         nn.ReLU(inplace=True),
@@ -51,13 +66,13 @@ class MultiTaskNet(nn.Module):
         backbone_name="legacy_xception",
         pretrained=False
     ):
+
         super().__init__()
 
         self.backbone = timm.create_model(
             backbone_name,
             pretrained=pretrained,
-            num_classes=0,
-            global_pool="avg"
+            num_classes=0
         )
 
         n_feat = self.backbone.num_features
@@ -79,12 +94,13 @@ class MultiTaskNet(nn.Module):
 
 
 # =========================================================
-# 3. WRAPPER UNTUK GRAD-CAM++
+# 3. WRAPPER GRAD-CAM++
 # =========================================================
 
 class HeadWrapper(nn.Module):
 
     def __init__(self, model, key):
+
         super().__init__()
 
         self.model = model
@@ -98,10 +114,10 @@ class HeadWrapper(nn.Module):
 
 
 # =========================================================
-# 4. LOAD MODEL
+# 4. LOAD CHECKPOINT MODEL
 # =========================================================
 
-@st.cache_resource
+@st.cache_resource(show_spinner=False)
 def load_model():
 
     device = torch.device(
@@ -117,32 +133,42 @@ def load_model():
 
         checkpoint = torch.load(
             MODEL_PATH,
-            map_location=device,
+            map_location="cpu",
             weights_only=True
         )
 
-        # Mendukung checkpoint dengan beberapa format
+        # Mendukung beberapa format checkpoint.
         if isinstance(checkpoint, dict):
 
             if "model_state_dict" in checkpoint:
+
                 state_dict = checkpoint["model_state_dict"]
 
             elif "state_dict" in checkpoint:
+
                 state_dict = checkpoint["state_dict"]
 
             else:
+
                 state_dict = checkpoint
 
-            # Mengatasi prefix DataParallel
-            state_dict = {
-                key.replace("module.", "", 1): value
-                for key, value in state_dict.items()
-            }
-
-            model.load_state_dict(state_dict)
-
         else:
-            model = checkpoint
+
+            raise TypeError(
+                "Checkpoint bukan state_dict yang valid."
+            )
+
+        # Menghapus prefix DataParallel jika tersedia.
+        state_dict = {
+            key.replace("module.", "", 1): value
+            for key, value in state_dict.items()
+        }
+
+        # Memuat bobot model.
+        model.load_state_dict(
+            state_dict,
+            strict=True
+        )
 
         model.to(device)
         model.eval()
@@ -155,7 +181,7 @@ def load_model():
 
 
 # =========================================================
-# 5. PREPROCESSING CITRA LETTERBOX
+# 5. PREPROCESSING LETTERBOX 384 x 768
 # =========================================================
 
 def resize_letterbox(
@@ -168,10 +194,20 @@ def resize_letterbox(
 
     h, w = img.shape[:2]
 
-    scale = min(th / h, tw / w)
+    scale = min(
+        th / h,
+        tw / w
+    )
 
-    new_h = max(1, round(h * scale))
-    new_w = max(1, round(w * scale))
+    new_h = max(
+        1,
+        round(h * scale)
+    )
+
+    new_w = max(
+        1,
+        round(w * scale)
+    )
 
     resized = cv2.resize(
         img,
@@ -222,7 +258,7 @@ def preprocess_image(image_pil):
 
     img_resized = resize_letterbox(
         image_np,
-        target_hw=IMAGE_SIZE,
+        target_hw=(IMAGE_HEIGHT, IMAGE_WIDTH),
         interpolation=cv2.INTER_CUBIC
     )
 
@@ -236,218 +272,379 @@ def preprocess_image(image_pil):
 
 
 # =========================================================
-# 7. PREDIKSI UMUR DAN GENDER
+# 7. FUNGSI MEMBERSIHKAN MEMORI
+# =========================================================
+
+def cleanup_memory(device):
+
+    gc.collect()
+
+    if device.type == "cuda":
+
+        torch.cuda.empty_cache()
+
+
+# =========================================================
+# 8. FUNGSI GRAD-CAM++
+# =========================================================
+
+def generate_gradcam(
+    model,
+    tensor,
+    base_img,
+    task_key,
+    device
+):
+
+    wrapper = None
+    cam_result = None
+
+    try:
+
+        model.zero_grad(set_to_none=True)
+
+        wrapper = HeadWrapper(
+            model,
+            task_key
+        )
+
+        target_layers = [
+            model.backbone.act4
+        ]
+
+        targets = [
+            ClassifierOutputTarget(0)
+        ]
+
+        # Grad-CAM++ membutuhkan gradient.
+        with torch.enable_grad():
+
+            with GradCAMPlusPlus(
+                model=wrapper,
+                target_layers=target_layers
+            ) as cam:
+
+                cam_result = cam(
+                    input_tensor=tensor,
+                    targets=targets
+                )[0]
+
+        # Membuat overlay heatmap.
+        visualization = show_cam_on_image(
+            base_img,
+            cam_result,
+            use_rgb=True
+        )
+
+        return visualization
+
+    finally:
+
+        model.zero_grad(set_to_none=True)
+
+        if wrapper is not None:
+            del wrapper
+
+        if cam_result is not None:
+            del cam_result
+
+        cleanup_memory(device)
+
+
+# =========================================================
+# 9. FUNGSI PREDIKSI MULTI-TASK
 # =========================================================
 
 def predict(image_pil, model, device):
 
-    tensor, img_resized = preprocess_image(image_pil)
+    tensor = None
+    outputs = None
 
-    tensor = tensor.to(device)
+    try:
 
-    # -----------------------------------------------------
-    # Inferensi
-    # -----------------------------------------------------
+        # ---------------------------------------------
+        # A. PREPROCESSING
+        # ---------------------------------------------
 
-    with torch.no_grad():
-
-        outputs = model(tensor)
-
-        gender_prob = torch.sigmoid(
-            outputs["gender_logit"]
-        ).item()
-
-        gender_pred = (
-            "Laki-laki (Male)"
-            if gender_prob >= 0.5
-            else "Perempuan (Female)"
+        tensor, img_resized = preprocess_image(
+            image_pil
         )
 
-        age_pred = (
-            outputs["age_norm"].item() * AGE_MAX
+        tensor = tensor.to(device)
+
+        base_img = (
+            img_resized.astype(np.float32) / 255.0
         )
 
-    # -----------------------------------------------------
-    # Grad-CAM++ Gender
-    # -----------------------------------------------------
+        # ---------------------------------------------
+        # B. INFERENSI UMUR DAN GENDER
+        # ---------------------------------------------
 
-    target_layers = [
-        model.backbone.act4
-    ]
+        with torch.inference_mode():
 
-    targets = [
-        ClassifierOutputTarget(0)
-    ]
+            outputs = model(tensor)
 
-    base_img = (
-        img_resized.astype(np.float32) / 255.0
-    )
+            gender_prob = torch.sigmoid(
+                outputs["gender_logit"]
+            ).item()
 
-    with torch.enable_grad():
+            gender_pred = (
+                "Laki-laki (Male)"
+                if gender_prob >= 0.5
+                else "Perempuan (Female)"
+            )
 
-        gender_wrapper = HeadWrapper(
-            model,
-            "gender_logit"
+            age_pred = (
+                outputs["age_norm"].item() * AGE_MAX
+            )
+
+        del outputs
+        outputs = None
+
+        # ---------------------------------------------
+        # C. GRAD-CAM++ GENDER
+        # ---------------------------------------------
+
+        vis_gender = generate_gradcam(
+            model=model,
+            tensor=tensor,
+            base_img=base_img,
+            task_key="gender_logit",
+            device=device
         )
 
-        with GradCAMPlusPlus(
-            model=gender_wrapper,
-            target_layers=target_layers
-        ) as cam_gender:
+        # ---------------------------------------------
+        # D. GRAD-CAM++ UMUR
+        # ---------------------------------------------
 
-            cam_g = cam_gender(
-                input_tensor=tensor,
-                targets=targets
-            )[0]
-
-        vis_gender = show_cam_on_image(
-            base_img,
-            cam_g,
-            use_rgb=True
+        vis_age = generate_gradcam(
+            model=model,
+            tensor=tensor,
+            base_img=base_img,
+            task_key="age_norm",
+            device=device
         )
 
-        # -------------------------------------------------
-        # Grad-CAM++ Age
-        # -------------------------------------------------
+        # ---------------------------------------------
+        # E. SIMPAN HASIL
+        # ---------------------------------------------
 
-        age_wrapper = HeadWrapper(
-            model,
-            "age_norm"
-        )
+        result = {
 
-        with GradCAMPlusPlus(
-            model=age_wrapper,
-            target_layers=target_layers
-        ) as cam_age:
+            "gender": gender_pred,
 
-            cam_a = cam_age(
-                input_tensor=tensor,
-                targets=targets
-            )[0]
+            "gender_probability": gender_prob,
 
-        vis_age = show_cam_on_image(
-            base_img,
-            cam_a,
-            use_rgb=True
-        )
+            "age": round(age_pred, 1),
 
-    # Membersihkan memori
-    del tensor
-    gc.collect()
+            "gender_cam": vis_gender,
 
-    if device.type == "cuda":
-        torch.cuda.empty_cache()
+            "age_cam": vis_age,
 
-    return {
-        "gender": gender_pred,
-        "gender_probability": gender_prob,
-        "age": round(age_pred, 1),
-        "gender_cam": vis_gender,
-        "age_cam": vis_age,
-        "processed_image": img_resized
-    }
+            "processed_image": img_resized
+
+        }
+
+        return result
+
+    finally:
+
+        if outputs is not None:
+            del outputs
+
+        if tensor is not None:
+            del tensor
+
+        model.zero_grad(set_to_none=True)
+
+        cleanup_memory(device)
 
 
 # =========================================================
-# 8. TAMPILAN STREAMLIT
+# 10. IDENTITAS FILE UPLOAD
 # =========================================================
 
-st.title("🦷 Deteksi Umur dan Gender Manusia")
+def get_file_hash(file_bytes):
+
+    return hashlib.sha256(
+        file_bytes
+    ).hexdigest()
+
+
+# =========================================================
+# 11. MEMUAT MODEL
+# =========================================================
+
+st.title(
+    "🦷 Deteksi Umur dan Gender Manusia"
+)
 
 st.markdown(
     """
-    Aplikasi berbasis **Xception Multi-task Learning**
-    untuk melakukan estimasi umur dan klasifikasi gender
-    berdasarkan citra *Panoramic Dental X-Ray*.
+    Aplikasi deteksi umur dan gender manusia menggunakan
+    arsitektur **Xception Multi-task Learning** berdasarkan
+    citra *Panoramic Dental X-Ray*.
 
-    Model dilengkapi dengan visualisasi **Grad-CAM++**
-    untuk membantu melihat area citra yang berkontribusi
-    terhadap hasil prediksi.
+    Aplikasi dilengkapi dengan visualisasi **Grad-CAM++**
+    untuk melihat area citra yang berkontribusi terhadap
+    hasil prediksi model.
     """
 )
 
 st.divider()
 
-
-# =========================================================
-# 9. MEMUAT MODEL
-# =========================================================
-
 with st.spinner("Memuat model Xception..."):
 
     model, device, error = load_model()
 
+
 if model is None:
 
     st.error(
-        "Gagal memuat model Xception."
+        "Model gagal dimuat."
     )
 
     st.code(error)
 
     st.info(
-        "Pastikan file best_model.pth berada "
-        "dalam folder yang sama dengan app.py."
+        "Pastikan best_model.pth berada di folder yang sama "
+        "dengan app.py dan checkpoint sesuai arsitektur model."
     )
 
     st.stop()
 
-else:
+st.success(
+    f"Model berhasil dimuat | Device: {device}"
+)
 
-    st.success(
-        f"Model berhasil dimuat! Perangkat: {device}"
+
+# =========================================================
+# 12. SIDEBAR INFORMASI
+# =========================================================
+
+with st.sidebar:
+
+    st.header("🦷 Informasi Model")
+
+    st.write("**Arsitektur:** Xception")
+
+    st.write("**Pendekatan:** Multi-task Learning")
+
+    st.write("**Backbone:** Legacy Xception")
+
+    st.write("**Input:** 384 × 768 piksel")
+
+    st.write("**Task 1:** Gender Classification")
+
+    st.write("**Task 2:** Age Regression")
+
+    st.write("**Visualisasi:** Grad-CAM++")
+
+    st.divider()
+
+    st.caption(
+        "Model ini digunakan sebagai prototipe "
+        "penelitian deteksi umur dan gender berdasarkan "
+        "citra panoramic dental X-ray."
+    )
+
+    st.write(
+        f"Perangkat komputasi: {device}"
     )
 
 
 # =========================================================
-# 10. UPLOAD CITRA
+# 13. INISIALISASI SESSION STATE
 # =========================================================
 
-st.subheader("1. Unggah Citra Dental X-Ray")
+if "analysis_result" not in st.session_state:
+
+    st.session_state.analysis_result = None
+
+if "current_file_hash" not in st.session_state:
+
+    st.session_state.current_file_hash = None
+
+
+# =========================================================
+# 14. UPLOAD CITRA
+# =========================================================
+
+st.subheader("1. Unggah Citra Panoramic Dental X-Ray")
 
 uploaded_file = st.file_uploader(
-    "Pilih citra panoramic dental X-ray",
+    "Pilih citra panoramic dental X-Ray",
     type=["jpg", "jpeg", "png"],
-    help="Format citra yang didukung: JPG, JPEG, dan PNG."
+    help="Format yang didukung: JPG, JPEG, dan PNG."
 )
+
 
 if uploaded_file is not None:
 
-    image = Image.open(uploaded_file).convert("RGB")
+    file_bytes = uploaded_file.getvalue()
 
-    col1, col2 = st.columns([1, 1])
+    current_hash = get_file_hash(file_bytes)
+
+    # Menghapus hasil lama jika gambar berubah.
+    if current_hash != st.session_state.current_file_hash:
+
+        st.session_state.current_file_hash = current_hash
+
+        st.session_state.analysis_result = None
+
+    try:
+
+        image = Image.open(
+            io.BytesIO(file_bytes)
+        ).convert("RGB")
+
+    except Exception as e:
+
+        st.error(
+            f"Gagal membaca gambar: {e}"
+        )
+
+        st.stop()
+
+    # ---------------------------------------------
+    # TAMPILAN CITRA
+    # ---------------------------------------------
+
+    col1, col2 = st.columns(2)
 
     with col1:
 
         st.image(
             image,
             caption="Citra Dental X-Ray Original",
-            use_container_width=True
+            width="stretch"
         )
 
     with col2:
 
+        preview = resize_letterbox(
+            np.array(image),
+            target_hw=(IMAGE_HEIGHT, IMAGE_WIDTH)
+        )
+
         st.image(
-            resize_letterbox(
-                np.array(image),
-                target_hw=IMAGE_SIZE
-            ),
+            preview,
             caption="Citra Setelah Preprocessing",
-            use_container_width=True
+            width="stretch"
         )
 
     st.divider()
 
-    # =====================================================
-    # 11. TOMBOL PREDIKSI
-    # =====================================================
+    # =================================================
+    # 15. TOMBOL ANALISIS
+    # =================================================
 
-    st.subheader("2. Hasil Prediksi Model")
+    st.subheader("2. Analisis Citra")
 
     if st.button(
         "🔍 Mulai Analisis",
         type="primary",
-        use_container_width=True
+        width="stretch"
     ):
 
         try:
@@ -456,138 +653,159 @@ if uploaded_file is not None:
                 "Model sedang menganalisis citra..."
             ):
 
-                results = predict(
+                result = predict(
                     image,
                     model,
                     device
                 )
 
+                st.session_state.analysis_result = result
+
             st.success(
-                "Analisis citra berhasil dilakukan!"
-            )
-
-            # ---------------------------------------------
-            # HASIL PREDIKSI
-            # ---------------------------------------------
-
-            col1, col2 = st.columns(2)
-
-            with col1:
-
-                st.metric(
-                    label="Prediksi Gender",
-                    value=results["gender"]
-                )
-
-                st.metric(
-                    label="Probabilitas Gender",
-                    value=f"{results['gender_probability'] * 100:.2f}%"
-                )
-
-            with col2:
-
-                st.metric(
-                    label="Estimasi Umur",
-                    value=f"{results['age']} Tahun"
-                )
-
-                st.metric(
-                    label="Ukuran Citra",
-                    value="384 × 768"
-                )
-
-            st.divider()
-
-            # ---------------------------------------------
-            # GRAD-CAM++
-            # ---------------------------------------------
-
-            st.subheader(
-                "3. Visualisasi Grad-CAM++"
-            )
-
-            st.markdown(
-                """
-                Heatmap menunjukkan area citra yang memiliki
-                kontribusi terhadap keluaran masing-masing
-                task pada model.
-                """
-            )
-
-            cam_col1, cam_col2 = st.columns(2)
-
-            with cam_col1:
-
-                st.markdown(
-                    "**Grad-CAM++ - Gender**"
-                )
-
-                st.image(
-                    results["gender_cam"],
-                    use_container_width=True
-                )
-
-            with cam_col2:
-
-                st.markdown(
-                    "**Grad-CAM++ - Estimasi Umur**"
-                )
-
-                st.image(
-                    results["age_cam"],
-                    use_container_width=True
-                )
-
-            st.divider()
-
-            st.caption(
-                """
-                Catatan: Hasil aplikasi merupakan estimasi
-                model pembelajaran mendalam dan bukan
-                pengganti pemeriksaan atau penilaian profesional.
-                """
+                "Analisis berhasil dilakukan!"
             )
 
         except Exception as e:
+
+            st.session_state.analysis_result = None
 
             st.error(
                 f"Terjadi kesalahan saat analisis: {e}"
             )
 
+            with st.expander("Detail kesalahan"):
+
+                st.code(
+                    traceback.format_exc()
+                )
+
+    # =================================================
+    # 16. MENAMPILKAN HASIL
+    # =================================================
+
+    if st.session_state.analysis_result is not None:
+
+        results = st.session_state.analysis_result
+
+        st.divider()
+
+        st.subheader("3. Hasil Prediksi")
+
+        # ---------------------------------------------
+        # HASIL GENDER DAN UMUR
+        # ---------------------------------------------
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+
+            st.metric(
+                label="Prediksi Gender",
+                value=results["gender"]
+            )
+
+            st.metric(
+                label="Probabilitas Gender",
+                value=(
+                    f"{results['gender_probability'] * 100:.2f}%"
+                )
+            )
+
+        with col2:
+
+            st.metric(
+                label="Estimasi Umur",
+                value=f"{results['age']} Tahun"
+            )
+
+            st.metric(
+                label="Ukuran Input Model",
+                value="384 × 768"
+            )
+
+        st.divider()
+
+        # ---------------------------------------------
+        # VISUALISASI GRAD-CAM++
+        # ---------------------------------------------
+
+        st.subheader(
+            "4. Visualisasi Grad-CAM++"
+        )
+
+        st.markdown(
+            """
+            Visualisasi Grad-CAM++ digunakan untuk
+            mengidentifikasi area citra yang memberikan
+            kontribusi terhadap keluaran model pada
+            masing-masing tugas prediksi.
+            """
+        )
+
+        cam_col1, cam_col2 = st.columns(2)
+
+        with cam_col1:
+
+            st.markdown(
+                "**Grad-CAM++ Gender**"
+            )
+
+            st.image(
+                results["gender_cam"],
+                width="stretch"
+            )
+
+        with cam_col2:
+
+            st.markdown(
+                "**Grad-CAM++ Estimasi Umur**"
+            )
+
+            st.image(
+                results["age_cam"],
+                width="stretch"
+            )
+
+        st.divider()
+
+        # ---------------------------------------------
+        # RESET HASIL
+        # ---------------------------------------------
+
+        if st.button(
+            "🔄 Hapus Hasil Analisis",
+            width="stretch"
+        ):
+
+            st.session_state.analysis_result = None
+
+            cleanup_memory(device)
+
+            st.rerun()
+
 else:
 
+    # Reset ketika upload dihapus.
+    st.session_state.current_file_hash = None
+    st.session_state.analysis_result = None
+
     st.info(
-        "Silakan unggah citra panoramic dental X-ray "
+        "Silakan unggah citra panoramic dental X-Ray "
         "untuk memulai analisis."
     )
 
 
 # =========================================================
-# 12. INFORMASI MODEL
+# 17. FOOTER
 # =========================================================
 
-with st.expander("Informasi Arsitektur Model"):
+st.divider()
 
-    st.write(
-        """
-        **Arsitektur:** Xception
-
-        **Pendekatan:** Multi-task Learning
-
-        **Backbone:** Legacy Xception (timm)
-
-        **Task 1:** Klasifikasi Gender
-
-        **Task 2:** Regresi Umur
-
-        **Ukuran Input:** 384 × 768 piksel
-
-        **Normalisasi:** ImageNet
-
-        **Visualisasi:** Grad-CAM++
-
-        **Output Gender:** Female / Male
-
-        **Output Umur:** Tahun
-        """
-    )
+st.caption(
+    """
+    Sistem ini merupakan prototipe penelitian akademik.
+    Hasil prediksi merupakan estimasi berbasis model
+    pembelajaran mendalam dan bukan pengganti pemeriksaan
+    atau penilaian profesional.
+    """
+)
