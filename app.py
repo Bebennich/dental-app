@@ -1,9 +1,8 @@
 
 # ============================================================
-# DENTAL AI
-# XCEPTION MULTI-TASK LEARNING
-# AGE ESTIMATION + GENDER CLASSIFICATION
-# STREAMLIT APPLICATION
+# DENTAL AI - XCEPTION MULTI-TASK LEARNING
+# Age Estimation & Gender Classification
+# Streamlit Deployment
 # ============================================================
 
 
@@ -25,8 +24,8 @@ import os
 import gc
 import io
 import hashlib
-import traceback
 import textwrap
+import traceback
 
 from pathlib import Path
 from PIL import Image
@@ -59,6 +58,8 @@ IMAGE_WIDTH = 768
 AGE_MAX = 100.0
 GENDER_THRESHOLD = 0.5
 
+DEVICE = torch.device("cpu")
+
 try:
     torch.set_num_threads(2)
     torch.set_num_interop_threads(1)
@@ -67,7 +68,7 @@ except RuntimeError:
 
 
 # ============================================================
-# 3. HTML HELPER
+# 3. HTML RENDER HELPER
 # ============================================================
 
 def render_html(html):
@@ -85,8 +86,6 @@ def render_html(html):
 render_html("""
 <style>
 
-/* GLOBAL */
-
 .stApp {
     background-color: #F3F6FA;
 }
@@ -97,8 +96,6 @@ render_html("""
     padding-bottom: 3rem;
 }
 
-/* TYPOGRAPHY */
-
 h1, h2, h3 {
     color: #142D46;
 }
@@ -106,8 +103,6 @@ h1, h2, h3 {
 p {
     color: #607286;
 }
-
-/* SIDEBAR */
 
 section[data-testid="stSidebar"] {
     background: linear-gradient(
@@ -118,27 +113,23 @@ section[data-testid="stSidebar"] {
 }
 
 section[data-testid="stSidebar"] * {
-    color: #FFFFFF;
+    color: white;
 }
-
-/* HERO */
 
 .hero {
     background: linear-gradient(
         120deg,
-        #10243B 0%,
-        #176B87 100%
+        #10243B,
+        #176B87
     );
-
     padding: 35px;
     border-radius: 18px;
     margin-bottom: 28px;
-
     box-shadow: 0 8px 25px rgba(16,36,59,0.12);
 }
 
 .hero h1 {
-    color: #FFFFFF !important;
+    color: white !important;
     font-size: 32px;
     font-weight: 750;
     margin-bottom: 10px;
@@ -158,8 +149,6 @@ section[data-testid="stSidebar"] * {
     margin-bottom: 12px;
 }
 
-/* SECTION */
-
 .section-title {
     color: #142D46;
     font-size: 21px;
@@ -174,18 +163,14 @@ section[data-testid="stSidebar"] * {
     margin-bottom: 18px;
 }
 
-/* CARDS */
-
 div[data-testid="stVerticalBlockBorderWrapper"] {
-    background-color: #FFFFFF;
+    background-color: white;
     border: 1px solid #E4EBF2;
     border-radius: 14px;
 }
 
-/* METRICS */
-
 div[data-testid="stMetric"] {
-    background: #FFFFFF;
+    background: white;
     padding: 18px;
     border: 1px solid #E5ECF3;
     border-radius: 14px;
@@ -200,13 +185,10 @@ div[data-testid="stMetricValue"] {
     font-weight: 750;
 }
 
-/* BUTTONS */
-
 .stButton > button {
     min-height: 45px;
     border-radius: 10px;
     font-weight: 650;
-    transition: 0.2s;
 }
 
 .stButton > button[kind="primary"] {
@@ -220,22 +202,16 @@ div[data-testid="stMetricValue"] {
     color: white;
 }
 
-/* UPLOADER */
-
 div[data-testid="stFileUploader"] {
-    background: #FFFFFF;
+    background: white;
     border: 1px dashed #91B9CA;
     border-radius: 14px;
     padding: 15px;
 }
 
-/* IMAGE */
-
 div[data-testid="stImage"] img {
     border-radius: 10px;
 }
-
-/* FOOTER */
 
 .footer {
     text-align: center;
@@ -333,90 +309,178 @@ class HeadWrapper(nn.Module):
 
 
 # ============================================================
-# 7. LOAD TRAINED MODEL
+# 7. CHECKPOINT EXTRACTION
+# ============================================================
+
+def extract_state_dict(checkpoint):
+
+    if not isinstance(checkpoint, dict):
+
+        raise TypeError(
+            "Checkpoint bukan dictionary. "
+            "File harus berisi state_dict atau checkpoint dictionary."
+        )
+
+    # Format checkpoint yang umum digunakan
+    possible_keys = [
+        "model_state_dict",
+        "state_dict",
+        "model"
+    ]
+
+    state_dict = None
+
+    for key in possible_keys:
+
+        if key in checkpoint and isinstance(
+            checkpoint[key], dict
+        ):
+
+            state_dict = checkpoint[key]
+
+            print(f"Checkpoint format detected: {key}")
+
+            break
+
+    # Jika checkpoint langsung berisi state_dict
+    if state_dict is None:
+
+        state_dict = checkpoint
+
+    # Validasi parameter
+    if not state_dict:
+
+        raise ValueError(
+            "State dictionary kosong."
+        )
+
+    if not all(
+        isinstance(k, str) for k in state_dict.keys()
+    ):
+
+        raise ValueError(
+            "Checkpoint memiliki nama parameter yang tidak valid."
+        )
+
+    # Remove DataParallel prefix
+    cleaned_state = {}
+
+    for key, value in state_dict.items():
+
+        if key.startswith("module."):
+
+            key = key[len("module."):]
+
+        cleaned_state[key] = value
+
+    return cleaned_state
+
+
+# ============================================================
+# 8. LOAD MODEL
 # ============================================================
 
 @st.cache_resource(show_spinner=False)
 def load_model():
 
-    device = torch.device("cpu")
+    print("=" * 60)
+    print("DENTAL AI MODEL INITIALIZATION")
+    print("=" * 60)
+
+    print("Model path:", MODEL_PATH)
+    print("File exists:", MODEL_PATH.exists())
+
+    if not MODEL_PATH.exists():
+
+        raise FileNotFoundError(
+            f"File model tidak ditemukan: {MODEL_PATH}"
+        )
+
+    file_size = MODEL_PATH.stat().st_size / (1024 ** 2)
+
+    print(f"Checkpoint size: {file_size:.2f} MB")
+
+    if file_size == 0:
+
+        raise ValueError(
+            "File best_model.pth kosong."
+        )
+
+    # Build architecture
+    print("[1/4] Creating Xception architecture...")
+
+    model = MultiTaskNet(
+        backbone_name="legacy_xception",
+        pretrained=False
+    )
+
+    # Load checkpoint
+    print("[2/4] Reading checkpoint...")
 
     try:
 
-        if not MODEL_PATH.exists():
-
-            raise FileNotFoundError(
-                f"Model tidak ditemukan: {MODEL_PATH}"
-            )
-
-        model = MultiTaskNet(
-            backbone_name="legacy_xception",
-            pretrained=False
+        checkpoint = torch.load(
+            MODEL_PATH,
+            map_location="cpu",
+            weights_only=True
         )
 
-        # Load checkpoint
-        try:
+    except TypeError:
 
-            checkpoint = torch.load(
-                MODEL_PATH,
-                map_location="cpu",
-                weights_only=True
-            )
+        # Compatibility for older PyTorch
+        checkpoint = torch.load(
+            MODEL_PATH,
+            map_location="cpu"
+        )
 
-        except TypeError:
+    print("Checkpoint type:", type(checkpoint))
 
-            checkpoint = torch.load(
-                MODEL_PATH,
-                map_location="cpu"
-            )
+    # Extract state_dict
+    print("[3/4] Extracting model parameters...")
 
-        if not isinstance(checkpoint, dict):
+    state_dict = extract_state_dict(checkpoint)
 
-            raise TypeError(
-                "Checkpoint harus berupa state_dict."
-            )
+    print("Total checkpoint parameters:", len(state_dict))
 
-        if "model_state_dict" in checkpoint:
+    # Strict loading
+    print("[4/4] Loading model weights...")
 
-            state_dict = checkpoint["model_state_dict"]
-
-        elif "state_dict" in checkpoint:
-
-            state_dict = checkpoint["state_dict"]
-
-        else:
-
-            state_dict = checkpoint
-
-        # Remove DataParallel prefix
-        cleaned_state = {}
-
-        for key, value in state_dict.items():
-
-            if key.startswith("module."):
-
-                key = key[len("module."):]
-
-            cleaned_state[key] = value
+    try:
 
         model.load_state_dict(
-            cleaned_state,
+            state_dict,
             strict=True
         )
 
-        model.to(device)
+    except RuntimeError as e:
 
-        model.eval()
+        raise RuntimeError(
+            "Struktur checkpoint tidak cocok dengan "
+            "arsitektur Xception Multi-task.\n\n"
+            f"Detail: {str(e)}"
+        ) from e
 
-        return model, device, None
+    model.to(DEVICE)
 
-    except Exception as e:
+    model.eval()
 
-        return None, device, str(e)
+    # Check Grad-CAM layer
+    if not hasattr(model.backbone, "act4"):
+
+        raise AttributeError(
+            "Layer act4 tidak ditemukan pada backbone. "
+            "Periksa versi timm dan arsitektur Xception."
+        )
+
+    print("MODEL SUCCESSFULLY LOADED")
+
+    print("=" * 60)
+
+    return model
 
 
 # ============================================================
-# 8. LETTERBOX PREPROCESSING
+# 9. LETTERBOX PREPROCESSING
 # ============================================================
 
 def resize_letterbox(
@@ -428,6 +492,12 @@ def resize_letterbox(
     target_h, target_w = target_hw
 
     h, w = img.shape[:2]
+
+    if h <= 0 or w <= 0:
+
+        raise ValueError(
+            "Ukuran gambar tidak valid."
+        )
 
     scale = min(
         target_h / h,
@@ -451,9 +521,11 @@ def resize_letterbox(
     )
 
     top = (target_h - new_h) // 2
+
     bottom = target_h - new_h - top
 
     left = (target_w - new_w) // 2
+
     right = target_w - new_w - left
 
     output = cv2.copyMakeBorder(
@@ -470,7 +542,7 @@ def resize_letterbox(
 
 
 # ============================================================
-# 9. EVALUATION TRANSFORM
+# 10. EVALUATION TRANSFORM
 # ============================================================
 
 eval_trans = A.Compose([
@@ -486,7 +558,7 @@ eval_trans = A.Compose([
 
 
 # ============================================================
-# 10. IMAGE PREPROCESSING
+# 11. IMAGE PREPROCESSING
 # ============================================================
 
 def preprocess_image(image_pil):
@@ -505,13 +577,13 @@ def preprocess_image(image_pil):
         image=img_resized
     )["image"]
 
-    tensor = tensor.unsqueeze(0)
+    tensor = tensor.unsqueeze(0).to(DEVICE)
 
     return tensor, img_resized
 
 
 # ============================================================
-# 11. MEMORY CLEANUP
+# 12. MEMORY CLEANUP
 # ============================================================
 
 def cleanup_memory():
@@ -524,7 +596,7 @@ def cleanup_memory():
 
 
 # ============================================================
-# 12. GENERATE GRAD-CAM++
+# 13. GRAD-CAM++
 # ============================================================
 
 def generate_gradcam(
@@ -543,13 +615,6 @@ def generate_gradcam(
 
     try:
 
-        # Check target layer
-        if not hasattr(model.backbone, "act4"):
-
-            raise AttributeError(
-                "Layer act4 tidak ditemukan pada Xception."
-            )
-
         target_layers = [
             model.backbone.act4
         ]
@@ -560,7 +625,7 @@ def generate_gradcam(
 
         model.zero_grad(set_to_none=True)
 
-        # Grad-CAM++ requires gradient calculation
+        # Grad-CAM++ needs gradients
         with torch.enable_grad():
 
             with GradCAMPlusPlus(
@@ -586,6 +651,7 @@ def generate_gradcam(
         model.zero_grad(set_to_none=True)
 
         if cam_result is not None:
+
             del cam_result
 
         del wrapper
@@ -594,7 +660,7 @@ def generate_gradcam(
 
 
 # ============================================================
-# 13. PREDICTION FUNCTION
+# 14. PREDICTION FUNCTION
 # ============================================================
 
 def predict(image_pil, model):
@@ -603,9 +669,16 @@ def predict(image_pil, model):
 
     outputs = None
 
+    gender_cam = None
+
+    age_cam = None
+
     try:
 
+        # --------------------------------------------
         # PREPROCESSING
+        # --------------------------------------------
+
         tensor, img_resized = preprocess_image(
             image_pil
         )
@@ -614,8 +687,11 @@ def predict(image_pil, model):
             img_resized.astype(np.float32) / 255.0
         )
 
+        # --------------------------------------------
         # INFERENCE
-        with torch.no_grad():
+        # --------------------------------------------
+
+        with torch.inference_mode():
 
             outputs = model(tensor)
 
@@ -628,22 +704,29 @@ def predict(image_pil, model):
             )
 
         del outputs
+
         outputs = None
 
+        # --------------------------------------------
         # GENDER PREDICTION
+        # --------------------------------------------
+
         if gender_prob >= GENDER_THRESHOLD:
 
             gender_pred = "Laki-laki (Male)"
 
-            gender_confidence = gender_prob
+            confidence = gender_prob
 
         else:
 
             gender_pred = "Perempuan (Female)"
 
-            gender_confidence = 1.0 - gender_prob
+            confidence = 1.0 - gender_prob
 
+        # --------------------------------------------
         # GRAD-CAM GENDER
+        # --------------------------------------------
+
         gender_cam = generate_gradcam(
             model=model,
             tensor=tensor,
@@ -651,7 +734,10 @@ def predict(image_pil, model):
             task_key="gender_logit"
         )
 
+        # --------------------------------------------
         # GRAD-CAM AGE
+        # --------------------------------------------
+
         age_cam = generate_gradcam(
             model=model,
             tensor=tensor,
@@ -659,13 +745,17 @@ def predict(image_pil, model):
             task_key="age_norm"
         )
 
+        # --------------------------------------------
+        # RESULT
+        # --------------------------------------------
+
         result = {
 
             "gender": gender_pred,
 
             "gender_probability": gender_prob,
 
-            "gender_confidence": gender_confidence,
+            "gender_confidence": confidence,
 
             "age": round(age_pred, 1),
 
@@ -682,10 +772,20 @@ def predict(image_pil, model):
     finally:
 
         if outputs is not None:
+
             del outputs
 
         if tensor is not None:
+
             del tensor
+
+        if gender_cam is not None:
+
+            del gender_cam
+
+        if age_cam is not None:
+
+            del age_cam
 
         model.zero_grad(set_to_none=True)
 
@@ -693,7 +793,7 @@ def predict(image_pil, model):
 
 
 # ============================================================
-# 14. FILE HASH
+# 15. FILE HASH
 # ============================================================
 
 def get_file_hash(file_bytes):
@@ -704,30 +804,45 @@ def get_file_hash(file_bytes):
 
 
 # ============================================================
-# 15. LOAD MODEL
+# 16. MODEL INITIALIZATION
 # ============================================================
 
-with st.spinner("Initializing Dental AI Engine..."):
+try:
 
-    model, device, model_error = load_model()
+    with st.spinner(
+        "Initializing Dental AI Engine..."
+    ):
 
+        model = load_model()
 
-if model is None:
+except Exception as e:
 
-    st.error("Xception model gagal dimuat.")
+    st.error(
+        "Xception model gagal dimuat."
+    )
 
-    st.code(model_error)
+    st.error(
+        f"{type(e).__name__}: {str(e)}"
+    )
 
-    st.info(
-        "Pastikan best_model.pth berada dalam "
-        "direktori yang sama dengan app.py."
+    with st.expander(
+        "Lihat detail error"
+    ):
+
+        st.code(
+            traceback.format_exc()
+        )
+
+    st.warning(
+        "Pastikan best_model.pth tersedia dan "
+        "struktur checkpoint sesuai dengan arsitektur training."
     )
 
     st.stop()
 
 
 # ============================================================
-# 16. SIDEBAR
+# 17. SIDEBAR
 # ============================================================
 
 with st.sidebar:
@@ -745,26 +860,15 @@ with st.sidebar:
             align-items:center;
             justify-content:center;
             font-size:34px;">
-
             🦷
-
         </div>
 
-        <h2 style="
-            color:white;
-            margin-top:14px;
-            margin-bottom:4px;">
-
+        <h2 style="color:white; margin-top:14px;">
             DENTAL AI
-
         </h2>
 
-        <p style="
-            color:#B7D3E3;
-            font-size:12px;">
-
+        <p style="color:#B7D3E3; font-size:12px;">
             Xception Multi-task Intelligence
-
         </p>
 
     </div>
@@ -811,7 +915,7 @@ with st.sidebar:
 
     st.success("Model Loaded")
 
-    st.caption(f"Device: {device}")
+    st.caption(f"Device: {DEVICE}")
 
     st.caption("Model: Xception Multi-task")
 
@@ -823,19 +927,15 @@ with st.sidebar:
         color:#B7D3E3;
         font-size:11px;
         padding:15px;">
-
         Academic Research Prototype
-
         <br><br>
-
         Dental AI System
-
     </div>
     """)
 
 
 # ============================================================
-# 17. HERO HEADER
+# 18. HERO HEADER
 # ============================================================
 
 render_html("""
@@ -859,7 +959,7 @@ render_html("""
 
 
 # ============================================================
-# 18. SESSION STATE
+# 19. SESSION STATE
 # ============================================================
 
 if "analysis_result" not in st.session_state:
@@ -872,7 +972,7 @@ if "current_file_hash" not in st.session_state:
 
 
 # ============================================================
-# 19. IMAGE UPLOAD
+# 20. IMAGE UPLOAD
 # ============================================================
 
 render_html("""
@@ -892,6 +992,10 @@ uploaded_file = st.file_uploader(
     key="dental_image_upload"
 )
 
+
+# ============================================================
+# 21. IMAGE PROCESSING
+# ============================================================
 
 if uploaded_file is not None:
 
@@ -915,23 +1019,27 @@ if uploaded_file is not None:
 
     except Exception as e:
 
-        st.error(f"Cannot read image: {e}")
+        st.error(
+            f"Cannot read image: {str(e)}"
+        )
 
         st.stop()
 
-    # PREPROCESSING PREVIEW
     processed_preview = resize_letterbox(
         np.array(image),
         target_hw=(IMAGE_HEIGHT, IMAGE_WIDTH)
     )
 
-    col1, col2 = st.columns(2, gap="large")
+    col1, col2 = st.columns(
+        2,
+        gap="large"
+    )
 
     with col1:
 
         with st.container(border=True):
 
-            st.markdown("**Original Dental X-Ray**")
+            st.markdown("### Original Dental X-Ray")
 
             st.image(
                 image,
@@ -939,14 +1047,15 @@ if uploaded_file is not None:
             )
 
             st.caption(
-                f"Original resolution: {image.width} × {image.height}"
+                f"Original resolution: "
+                f"{image.width} × {image.height}"
             )
 
     with col2:
 
         with st.container(border=True):
 
-            st.markdown("**Preprocessed Dental X-Ray**")
+            st.markdown("### Preprocessed Dental X-Ray")
 
             st.image(
                 processed_preview,
@@ -959,8 +1068,10 @@ if uploaded_file is not None:
 
 
     # ========================================================
-    # 20. ANALYSIS
+    # 22. ANALYSIS BUTTON
     # ========================================================
+
+    st.divider()
 
     render_html("""
     <div class="section-title">
@@ -968,12 +1079,12 @@ if uploaded_file is not None:
     </div>
 
     <div class="section-subtitle">
-        Execute the Xception model to estimate age and classify gender.
+        Execute Xception to estimate age and classify gender.
     </div>
     """)
 
     if st.button(
-        "🔍  ANALYZE DENTAL IMAGE",
+        "🔍 ANALYZE DENTAL IMAGE",
         type="primary",
         width="stretch",
         key="analyze_button"
@@ -1001,10 +1112,12 @@ if uploaded_file is not None:
             st.session_state.analysis_result = None
 
             st.error(
-                f"Analysis failed: {str(e)}"
+                f"Analysis failed: {type(e).__name__}: {str(e)}"
             )
 
-            with st.expander("Technical error details"):
+            with st.expander(
+                "Technical error details"
+            ):
 
                 st.code(
                     traceback.format_exc()
@@ -1012,7 +1125,7 @@ if uploaded_file is not None:
 
 
     # ========================================================
-    # 21. PREDICTION RESULTS
+    # 23. PREDICTION RESULTS
     # ========================================================
 
     if st.session_state.analysis_result is not None:
@@ -1074,7 +1187,9 @@ if uploaded_file is not None:
                     value=f"{results['age']:.1f} Years"
                 )
 
-                st.markdown("**Age Regression Output**")
+                st.markdown(
+                    "**Age Regression Output**"
+                )
 
                 st.caption(
                     "Normalized age prediction multiplied by 100."
@@ -1082,7 +1197,7 @@ if uploaded_file is not None:
 
 
         # ====================================================
-        # 22. GRAD-CAM++
+        # 24. GRAD-CAM++
         # ====================================================
 
         st.divider()
@@ -1134,7 +1249,7 @@ if uploaded_file is not None:
 
 
         # ====================================================
-        # 23. ANALYSIS SUMMARY
+        # 25. ANALYSIS SUMMARY
         # ====================================================
 
         st.divider()
@@ -1155,7 +1270,9 @@ if uploaded_file is not None:
 
                 st.markdown("**Gender**")
 
-                st.write(results["gender"])
+                st.write(
+                    results["gender"]
+                )
 
             with report_col2:
 
@@ -1170,7 +1287,7 @@ if uploaded_file is not None:
                 st.markdown("**Confidence**")
 
                 st.write(
-                    f"{confidence * 100:.2f}%"
+                    f"{results['gender_confidence'] * 100:.2f}%"
                 )
 
             st.caption(
@@ -1180,15 +1297,15 @@ if uploaded_file is not None:
 
 
         # ====================================================
-        # 24. RESET ANALYSIS
+        # 26. RESET RESULTS
         # ====================================================
 
         st.divider()
 
         if st.button(
-            "🔄 RESET ANALYSIS",
+            "🔄 CLEAR ANALYSIS RESULTS",
             width="stretch",
-            key="reset_button"
+            key="clear_button"
         ):
 
             st.session_state.analysis_result = None
@@ -1229,7 +1346,7 @@ else:
 
 
 # ============================================================
-# 25. FOOTER
+# 27. FOOTER
 # ============================================================
 
 render_html("""
