@@ -73,12 +73,15 @@ def load_model():
 
     device = torch.device("cpu")
     model = MultiTaskNet(backbone_name="legacy_xception", task_mode="multi", pretrained=False)
+    
     try:
-        model.load_state_dict(torch.load("best_model.pth", map_location=device))
+        # Memuat state_dict dari file lokal best_model.pth
+        state_dict = torch.load("best_model.pth", map_location=device)
+        model.load_state_dict(state_dict)
         model.eval()
         return model, device
     except Exception as e:
-        st.error(f"Gagal memuat model: {e}")
+        st.error(f"Gagal memuat model lokal: {e}")
         return None, None
 
 # ==========================================
@@ -138,24 +141,29 @@ if uploaded_file is not None:
     
     if analyze_btn and model is not None:
         with st.spinner("Menjalankan inferensi dan mengekstrak Grad-CAM++..."):
+            # Pra-pemrosesan (Resize Letterbox)
             img_resized = resize_letterbox(image_np, target_hw=(384, 768), interpolation=cv2.INTER_CUBIC)
             tensor = eval_trans(image=img_resized)["image"].unsqueeze(0).to(device)
             
+            # Inferensi Model
             with torch.no_grad():
                 outputs = model(tensor)
                 g_prob = torch.sigmoid(outputs["gender_logit"]).item()
                 gender_pred = "Laki-laki" if g_prob >= 0.5 else "Perempuan"
                 age_pred = outputs["age_norm"].item() * 100.0
             
+            # Ekstraksi Grad-CAM++
             target_layers = [model.backbone.act4]
             targets = [ClassifierOutputTarget(0)]
             base_img = img_resized.astype(np.float32) / 255.0
             
+            # 1. Grad-CAM Gender
             wrap_g = HeadWrapper(model, "gender_logit")
             cam_g = GradCAMPlusPlus(model=wrap_g, target_layers=target_layers)
             gray_cam_g = cam_g(input_tensor=tensor, targets=targets)[0, :]
             vis_gender = show_cam_on_image(base_img, gray_cam_g, use_rgb=True)
             
+            # 2. Grad-CAM Umur
             wrap_a = HeadWrapper(model, "age_norm")
             cam_a = GradCAMPlusPlus(model=wrap_a, target_layers=target_layers)
             gray_cam_a = cam_a(input_tensor=tensor, targets=targets)[0, :]
