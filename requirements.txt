@@ -6,3 +6,4 @@ albumentations>=1.4.0
 opencv-python-headless>=4.8.0
 numpy
 Pillow
+grad-cam>=1.5.0
