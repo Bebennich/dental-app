@@ -71,12 +71,9 @@ except RuntimeError:
 # 3. HTML RENDER HELPER
 # ============================================================
 
-def render_html(html):
 
-    st.markdown(
-        textwrap.dedent(html).strip(),
-        unsafe_allow_html=True
-    )
+def render_html(html):
+    st.html(textwrap.dedent(html).strip())
 
 
 # ============================================================
