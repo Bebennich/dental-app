@@ -21,7 +21,6 @@ st.set_page_config(
     layout="wide"
 )
 
-# Tentukan device secara global agar bisa diakses di mana saja
 device = torch.device("cpu")
 
 st.markdown("""
@@ -77,12 +76,19 @@ def load_model():
     model = MultiTaskNet(backbone_name="legacy_xception", task_mode="multi", pretrained=False)
     
     try:
-        state_dict = torch.load("best_model.pth", map_location=device)
-        model.load_state_dict(state_dict)
+        checkpoint = torch.load("best_model.pth", map_location=device)
+        
+        if isinstance(checkpoint, dict):
+            model.load_state_dict(checkpoint)
+        else:
+            model = checkpoint
+            
+        model.to(device)
         model.eval()
         return model, None
     except Exception as e:
-        return None, str(e)
+        import traceback
+        return None, traceback.format_exc()
 
 # ==========================================
 # 3. PRA-PEMROSESAN CITRA (Letterbox 384x768)
@@ -127,7 +133,8 @@ st.title("🦷 Deteksi Umur & Gender Berdasarkan Citra Panoramik")
 st.markdown("Unggah citra rontgen panoramik gigi untuk melihat hasil prediksi beserta visualisasi Grad-CAM++.")
 
 if model is None:
-    st.error(f"Gagal memuat model `best_model.pth`. Pastikan file berada di direktori yang sama. Detail error: {load_status}")
+    st.error("Gagal memuat model `best_model.pth`. Rincian error teknis:")
+    st.code(load_status)
 else:
     uploaded_file = st.file_uploader("Pilih file gambar rontgen (JPG/PNG)", type=["jpg", "jpeg", "png"])
 
