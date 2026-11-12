@@ -7,11 +7,45 @@ from PIL import Image
 import timm
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
+from pytorch_grad_cam import GradCAMPlusPlus
+from pytorch_grad_cam.utils.image import show_cam_on_image
+from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
 
 # ==========================================
-# 1. Definisi Arsitektur & Muat Model (Cache)
+# 1. Konfigurasi Halaman UI
 # ==========================================
-# Gunakan st.cache_resource agar bobot model (~80MB) hanya dimuat 1 kali ke memori server
+st.set_page_config(
+    page_title="Dental X-Ray Biometrics",
+    page_icon="🦷",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Custom CSS untuk mempercantik metrik
+st.markdown("""
+    <style>
+    div[data-testid="metric-container"] {
+        background-color: #f0f2f6;
+        border-radius: 10px;
+        padding: 15px;
+        box-shadow: 2px 2px 5px rgba(0,0,0,0.05);
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+# ==========================================
+# 2. Definisi Model & Helper Grad-CAM
+# ==========================================
+class HeadWrapper(nn.Module):
+    """Wrapper untuk memisahkan output multi-task agar bisa diproses Grad-CAM"""
+    def __init__(self, model, key):
+        super().__init__()
+        self.model = model
+        self.key = key
+
+    def forward(self, x):
+        return self.model(x)[self.key].unsqueeze(1)
+
 @st.cache_resource
 def load_model():
     def make_head(in_features):
@@ -27,10 +61,8 @@ def load_model():
             super().__init__()
             self.backbone = timm.create_model(backbone_name, pretrained=pretrained, num_classes=0)
             n_feat = self.backbone.num_features
-            if task_mode in ("multi", "gender"):
-                self.gender_head = make_head(n_feat)
-            if task_mode in ("multi", "age"):
-                self.age_head = make_head(n_feat)
+            self.gender_head = make_head(n_feat)
+            self.age_head = make_head(n_feat)
 
         def forward(self, x):
             feat = self.backbone(x)
@@ -44,7 +76,7 @@ def load_model():
     device = torch.device("cpu")
     model = MultiTaskNet(backbone_name="legacy_xception", task_mode="multi", pretrained=False)
     try:
-        # Pastikan file best_model.pth ada di folder yang sama
+        # Pemuatan model lokal (Jika sudah sukses pindah ke metode HF, sesuaikan lagi kodenya)
         model.load_state_dict(torch.load("best_model.pth", map_location=device))
         model.eval()
         return model, device
@@ -53,7 +85,7 @@ def load_model():
         return None, None
 
 # ==========================================
-# 2. Pra-pemrosesan (Sesuai Subbab 3.2.2.B)
+# 3. Pra-pemrosesan (Subbab 3.2.2.B)
 # ==========================================
 def resize_letterbox(img, target_hw=(384, 768), interpolation=cv2.INTER_CUBIC):
     th, tw = target_hw
@@ -61,7 +93,6 @@ def resize_letterbox(img, target_hw=(384, 768), interpolation=cv2.INTER_CUBIC):
     scale = min(th / h, tw / w)
     new_h, new_w = max(1, round(h * scale)), max(1, round(w * scale))
     resized = cv2.resize(img, (new_w, new_h), interpolation=interpolation)
-
     top = (th - new_h) // 2
     bottom = th - new_h - top
     left = (tw - new_w) // 2
@@ -74,52 +105,87 @@ eval_trans = A.Compose([
 ])
 
 # ==========================================
-# 3. Antarmuka Pengguna (UI) Streamlit
+# 4. Antarmuka Utama Streamlit
 # ==========================================
-st.set_page_config(page_title="Dental X-Ray Biometrics", page_icon="🦷", layout="centered")
-
-st.title("🦷 Deteksi Umur & Gender")
-st.markdown("Unggah citra rontgen panoramik gigi untuk memprediksi jenis kelamin dan estimasi umur menggunakan arsitektur **Xception Multi-task**.")
-
-# Inisialisasi model
 model, device = load_model()
 
-# Komponen Unggah File
+with st.sidebar:
+    st.image("https://upload.wikimedia.org/wikipedia/id/c/c4/Logo_UPN_Veteran_Jawa_Timur.png", width=100)
+    st.title("Tentang Sistem")
+    st.info("""
+    **Sistem Biometrik Dental X-Ray**
+    
+    Aplikasi ini mendemonstrasikan hasil penelitian skripsi menggunakan arsitektur **Xception Multi-task**.
+    
+    * **Input:** Citra Panoramik Gigi
+    * **Output:** Estimasi Umur & Prediksi Gender
+    * **Explainability:** Grad-CAM++
+    """)
+    st.markdown("---")
+    st.caption("Dikembangkan oleh: Muhammad Rifqi Rahmanda")
+
+st.title("🦷 Deteksi Umur & Gender Berdasarkan Citra Panoramik")
+st.markdown("Unggah citra rontgen panoramik gigi untuk melihat hasil prediksi beserta area fokus model (Grad-CAM++).")
+
 uploaded_file = st.file_uploader("Pilih file gambar (JPG/PNG)", type=["jpg", "jpeg", "png"])
 
 if uploaded_file is not None:
     image_pil = Image.open(uploaded_file).convert("RGB")
+    image_np = np.array(image_pil)
     
-    # Tampilkan gambar yang diunggah
-    st.image(image_pil, caption="Citra Rontgen Panoramik", use_container_width=True)
+    col_img, col_res = st.columns([1, 2])
     
-    # Tombol Eksekusi
-    if st.button("Mulai Analisis", type="primary") and model is not None:
-        with st.spinner("Memproses citra dan menjalankan inferensi..."):
-            image_np = np.array(image_pil)
-            
-            # 1. Resize & Letterbox
+    with col_img:
+        st.image(image_pil, caption="Citra Input", use_container_width=True)
+        analyze_btn = st.button("Analisis Gambar", type="primary", use_container_width=True)
+    
+    if analyze_btn and model is not None:
+        with st.spinner("Menjalankan inferensi dan mengekstrak Grad-CAM++..."):
+            # Pra-pemrosesan
             img_resized = resize_letterbox(image_np, target_hw=(384, 768), interpolation=cv2.INTER_CUBIC)
-            
-            # 2. Normalisasi & Konversi ke Tensor
             tensor = eval_trans(image=img_resized)["image"].unsqueeze(0).to(device)
             
-            # 3. Inferensi
+            # Inferensi
             with torch.no_grad():
                 outputs = model(tensor)
-                
-                # Prediksi Gender
                 g_prob = torch.sigmoid(outputs["gender_logit"]).item()
-                gender_pred = "Laki-laki (Male)" if g_prob >= 0.5 else "Perempuan (Female)"
-                
-                # Prediksi Umur (Y_norm * 100)
+                gender_pred = "Laki-laki" if g_prob >= 0.5 else "Perempuan"
                 age_pred = outputs["age_norm"].item() * 100.0
             
-            # 4. Tampilkan Hasil
-            st.success("Analisis Selesai!")
-            col1, col2 = st.columns(2)
+            # Eksekusi Grad-CAM++
+            target_layers = [model.backbone.act4]  # Layer target Xception
+            targets = [ClassifierOutputTarget(0)]
+            base_img = img_resized.astype(np.float32) / 255.0 # Denormalisasi visual untuk overlay
             
-            with col1:
-                st.metric(label="🧑 Prediksi Gender", value=gender_pred, delta=f"Prob. Laki-laki: {g_prob:.2f}", delta_color="off")
-            with col2:
-                st.metric(label="🎂 Estimasi Umur", value=f"{round(age_pred, 1)} Tahun")
+            # 1. Grad-CAM Gender
+            wrap_g = HeadWrapper(model, "gender_logit")
+            cam_g = GradCAMPlusPlus(model=wrap_g, target_layers=target_layers)
+            gray_cam_g = cam_g(input_tensor=tensor, targets=targets)[0, :]
+            vis_gender = show_cam_on_image(base_img, gray_cam_g, use_rgb=True)
+            
+            # 2. Grad-CAM Age
+            wrap_a = HeadWrapper(model, "age_norm")
+            cam_a = GradCAMPlusPlus(model=wrap_a, target_layers=target_layers)
+            gray_cam_a = cam_a(input_tensor=tensor, targets=targets)[0, :]
+            vis_age = show_cam_on_image(base_img, gray_cam_a, use_rgb=True)
+            
+            with col_res:
+                st.success("Analisis berhasil diselesaikan!")
+                
+                # Baris Metrik
+                m1, m2 = st.columns(2)
+                with m1:
+                    st.metric(label="🧑 Prediksi Jenis Kelamin", value=gender_pred, delta=f"Probabilitas: {g_prob:.2f}")
+                with m2:
+                    st.metric(label="🎂 Estimasi Umur", value=f"{round(age_pred, 1)} Tahun")
+                
+                # Tab Visualisasi Grad-CAM
+                st.markdown("### 🔍 Interpretabilitas Model (Grad-CAM++)")
+                tab1, tab2, tab3 = st.tabs(["Citra Prapemrosesan", "Heatmap Gender", "Heatmap Umur"])
+                
+                with tab1:
+                    st.image(img_resized, caption="Hasil Resize Letterbox (384x768)", use_container_width=True)
+                with tab2:
+                    st.image(vis_gender, caption=f"Fokus model saat memprediksi gender {gender_pred}", use_container_width=True)
+                with tab3:
+                    st.image(vis_age, caption=f"Fokus model saat mengestimasi umur {round(age_pred, 1)} tahun", use_container_width=True)
