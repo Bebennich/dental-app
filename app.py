@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import cv2
 import numpy as np
+import gc
 from PIL import Image
 import timm
 import albumentations as A
@@ -152,22 +153,26 @@ if uploaded_file is not None:
                 gender_pred = "Laki-laki" if g_prob >= 0.5 else "Perempuan"
                 age_pred = outputs["age_norm"].item() * 100.0
             
-            # Ekstraksi Grad-CAM++
+            # Ekstraksi Grad-CAM++ dengan Garbage Collection
             target_layers = [model.backbone.act4]
             targets = [ClassifierOutputTarget(0)]
             base_img = img_resized.astype(np.float32) / 255.0
             
             # 1. Grad-CAM Gender
-            wrap_g = HeadWrapper(model, "gender_logit")
-            cam_g = GradCAMPlusPlus(model=wrap_g, target_layers=target_layers)
-            gray_cam_g = cam_g(input_tensor=tensor, targets=targets)[0, :]
+            with GradCAMPlusPlus(model=HeadWrapper(model, "gender_logit"),
+                                 target_layers=target_layers) as cam_g:
+                gray_cam_g = cam_g(input_tensor=tensor, targets=targets)[0, :]
             vis_gender = show_cam_on_image(base_img, gray_cam_g, use_rgb=True)
+            gc.collect()
             
             # 2. Grad-CAM Umur
-            wrap_a = HeadWrapper(model, "age_norm")
-            cam_a = GradCAMPlusPlus(model=wrap_a, target_layers=target_layers)
-            gray_cam_a = cam_a(input_tensor=tensor, targets=targets)[0, :]
+            with GradCAMPlusPlus(model=HeadWrapper(model, "age_norm"),
+                                 target_layers=target_layers) as cam_a:
+                gray_cam_a = cam_a(input_tensor=tensor, targets=targets)[0, :]
             vis_age = show_cam_on_image(base_img, gray_cam_a, use_rgb=True)
+            
+            del tensor
+            gc.collect()
             
             with col_res:
                 st.success("Analisis berhasil diselesaikan!")
