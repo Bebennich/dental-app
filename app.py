@@ -1009,7 +1009,9 @@ with st.sidebar:
 
     st.success(
        "<h3 style='color:#142D46 !important;'>"
-        "Model Loaded")
+        "Model Loaded",
+        unsafe_allow_html=True
+    )
 
     st.markdown(f"Device: {DEVICE}")
 
