@@ -105,8 +105,10 @@ render_html("""
 }
 
 .stSuccess{
-    color: #142D46 !important;
-    opacity: 1 !important;
+    background: #FFFFFF !important;
+    border: 1px dashed #91B9CA;
+    border-radius: 14px;
+    padding: 15px;
 }
 
 /* HEADINGS */
