@@ -1007,7 +1007,9 @@ with st.sidebar:
 
     st.markdown("### ⚙️ System Status")
 
-    st.success("Model Loaded")
+    st.success("Model Loaded")(
+        "<h3 style='color:#142D46 !important;'>"
+    )
 
     st.markdown(f"Device: {DEVICE}")
 
