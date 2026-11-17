@@ -229,13 +229,64 @@ div[data-testid="stMetricValue"] div {
 /* FILE UPLOADER */
 div[data-testid="stFileUploader"] {
     background: #FFFFFF !important;
-    border: 1px dashed #91B9CA;
-    border-radius: 14px;
-    padding: 15px;
+    border: 1px solid #DCE5ED !important;
+    border-radius: 16px !important;
+    padding: 15px !important;
 }
 
-div[data-testid="stFileUploader"] * {
+/* Upload dropzone */
+div[data-testid="stFileUploaderDropzone"] {
+    background: #F8FBFE !important;
+    border: 2px dashed #91B9CA !important;
+    border-radius: 12px !important;
+}
+
+/* All text inside dropzone */
+div[data-testid="stFileUploaderDropzone"] p,
+div[data-testid="stFileUploaderDropzone"] span,
+div[data-testid="stFileUploaderDropzone"] small,
+div[data-testid="stFileUploaderDropzone"] div {
     color: #263D52 !important;
+    opacity: 1 !important;
+}
+
+/* Browse files button */
+div[data-testid="stFileUploaderDropzone"] button {
+    background: #176B87 !important;
+    border: none !important;
+    border-radius: 8px !important;
+    color: #FFFFFF !important;
+}
+
+div[data-testid="stFileUploaderDropzone"] button * {
+    color: #FFFFFF !important;
+}
+
+/* Uploaded file container */
+div[data-testid="stFileUploaderFile"] {
+    background: #EAF2F8 !important;
+    border: 1px solid #D5E3ED !important;
+    border-radius: 10px !important;
+}
+
+/* Uploaded filename */
+div[data-testid="stFileUploaderFile"] p,
+div[data-testid="stFileUploaderFile"] span,
+div[data-testid="stFileUploaderFile"] div {
+    color: #18324B !important;
+    opacity: 1 !important;
+}
+
+/* Remove file button */
+div[data-testid="stFileUploaderFile"] button {
+    background: #DCEAF2 !important;
+    color: #18324B !important;
+    border-radius: 50% !important;
+}
+
+div[data-testid="stFileUploaderFile"] button svg {
+    color: #18324B !important;
+    fill: #18324B !important;
 }
 
 /* BUTTONS */
