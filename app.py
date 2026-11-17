@@ -294,6 +294,44 @@ hr {
     border-color: #D5DEE7 !important;
 }
 
+/* =====================================
+   MODEL STATUS - DENTAL AI
+===================================== */
+
+.model-status {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: #EAF6EF;
+    border: 1px solid #B8DEC6;
+    border-radius: 14px;
+    padding: 20px 24px;
+    margin: 15px 0;
+}
+
+.model-status .status-indicator {
+    width: 11px;
+    height: 11px;
+    background: #219653;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.model-status .status-text {
+    color: #176B3A !important;
+    font-size: 17px;
+    font-weight: 700;
+    background: transparent !important;
+    padding: 0 !important;
+    margin: 0 !important;
+}
+
+/* Text selection */
+::selection {
+    background: #176B87;
+    color: #FFFFFF;
+}
+
 /* FOOTER */
 .dental-footer {
     text-align: center;
@@ -1007,7 +1045,14 @@ with st.sidebar:
 
     st.markdown("### ⚙️ System Status")
 
-    st.success("Model Loaded")
+    st.html("""
+    <div class="model-status">
+        <span class="status-indicator"></span>
+        <span class="status-text">
+            Model Loaded Successfully
+        </span>
+    </div>
+    """)
 
     st.markdown(f"Device: {DEVICE}")
 
