@@ -104,13 +104,6 @@ render_html("""
     color: #42566B;
 }
 
-.stSuccess{
-    background: #FFFFFF !important;
-    border: 1px dashed #91B9CA;
-    border-radius: 14px;
-    padding: 15px;
-}
-
 /* HEADINGS */
 .stApp h1,
 .stApp h2,
