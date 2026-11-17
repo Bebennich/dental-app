@@ -1157,6 +1157,7 @@ if uploaded_file is not None:
                 "<h3 style='color:#142D46 !important;'>"
                 "Preprocessed Dental X-Ray</h3>",
                 unsafe_allow_html=True
+            )
             st.image(
                 processed_preview,
                 width="stretch"
