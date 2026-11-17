@@ -76,15 +76,18 @@ def render_html(html):
     st.html(textwrap.dedent(html).strip())
 
 
+
 # ============================================================
-# 4. CUSTOM CSS
+# 5. CUSTOM CSS - HIGH CONTRAST FIX
 # ============================================================
 
 render_html("""
 <style>
 
+/* MAIN APPLICATION */
 .stApp {
-    background-color: #F3F6FA;
+    background-color: #F3F6FA !important;
+    color: #18324B !important;
 }
 
 .block-container {
@@ -93,26 +96,62 @@ render_html("""
     padding-bottom: 3rem;
 }
 
-h1, h2, h3 {
-    color: #142D46;
+/* GENERAL TEXT */
+.stApp p,
+.stApp label,
+.stApp span,
+.stApp div[data-testid="stCaptionContainer"] {
+    color: #42566B;
 }
 
-p {
-    color: #607286;
+/* HEADINGS */
+.stApp h1,
+.stApp h2,
+.stApp h3,
+.stApp h4,
+.stApp h5 {
+    color: #142D46 !important;
+    opacity: 1 !important;
+    font-weight: 750 !important;
 }
 
+/* MARKDOWN HEADINGS */
+.stMarkdown h1,
+.stMarkdown h2,
+.stMarkdown h3 {
+    color: #142D46 !important;
+    opacity: 1 !important;
+}
+
+/* IMAGE SECTION TITLES */
+div[data-testid="stVerticalBlockBorderWrapper"] h1,
+div[data-testid="stVerticalBlockBorderWrapper"] h2,
+div[data-testid="stVerticalBlockBorderWrapper"] h3 {
+    color: #142D46 !important;
+    opacity: 1 !important;
+}
+
+/* IMAGE CAPTIONS */
+.stApp [data-testid="stCaptionContainer"] p {
+    color: #607286 !important;
+    opacity: 1 !important;
+    font-size: 13px !important;
+}
+
+/* SIDEBAR */
 section[data-testid="stSidebar"] {
     background: linear-gradient(
         180deg,
         #10243B 0%,
         #173D58 100%
-    );
+    ) !important;
 }
 
 section[data-testid="stSidebar"] * {
-    color: white;
+    color: #FFFFFF !important;
 }
 
+/* HERO HEADER */
 .hero {
     background: linear-gradient(
         120deg,
@@ -126,7 +165,7 @@ section[data-testid="stSidebar"] * {
 }
 
 .hero h1 {
-    color: white !important;
+    color: #FFFFFF !important;
     font-size: 32px;
     font-weight: 750;
     margin-bottom: 10px;
@@ -135,95 +174,153 @@ section[data-testid="stSidebar"] * {
 .hero p {
     color: #D6EAF2 !important;
     font-size: 14px;
-    margin-bottom: 0;
 }
 
 .hero-label {
-    color: #90D9E8;
+    color: #90D9E8 !important;
     font-size: 11px;
     font-weight: 700;
     letter-spacing: 2px;
-    margin-bottom: 12px;
 }
 
+/* SECTION TITLES */
 .section-title {
-    color: #142D46;
+    color: #142D46 !important;
     font-size: 21px;
-    font-weight: 750;
+    font-weight: 800;
     margin-top: 15px;
     margin-bottom: 5px;
 }
 
 .section-subtitle {
-    color: #7A8C9F;
-    font-size: 13px;
+    color: #607286 !important;
+    font-size: 14px;
     margin-bottom: 18px;
 }
 
+/* CARDS */
 div[data-testid="stVerticalBlockBorderWrapper"] {
-    background-color: white;
-    border: 1px solid #E4EBF2;
+    background-color: #FFFFFF !important;
+    border: 1px solid #DCE5ED !important;
     border-radius: 14px;
 }
 
+/* METRICS */
 div[data-testid="stMetric"] {
-    background: white;
+    background: #FFFFFF !important;
     padding: 18px;
     border: 1px solid #E5ECF3;
     border-radius: 14px;
 }
 
-div[data-testid="stMetricLabel"] {
-    color: #6C7F92;
+div[data-testid="stMetricLabel"],
+div[data-testid="stMetricLabel"] p {
+    color: #607286 !important;
+    opacity: 1 !important;
 }
 
-div[data-testid="stMetricValue"] {
-    color: #142D46;
-    font-weight: 750;
+div[data-testid="stMetricValue"],
+div[data-testid="stMetricValue"] div {
+    color: #142D46 !important;
+    opacity: 1 !important;
+    font-weight: 750 !important;
 }
 
-.stButton > button {
-    min-height: 45px;
-    border-radius: 10px;
-    font-weight: 650;
-}
-
-.stButton > button[kind="primary"] {
-    background: #147D9B;
-    color: white;
-    border: none;
-}
-
-.stButton > button[kind="primary"]:hover {
-    background: #105E78;
-    color: white;
-}
-
+/* FILE UPLOADER */
 div[data-testid="stFileUploader"] {
-    background: white;
+    background: #FFFFFF !important;
     border: 1px dashed #91B9CA;
     border-radius: 14px;
     padding: 15px;
 }
 
+div[data-testid="stFileUploader"] * {
+    color: #263D52 !important;
+}
+
+/* BUTTONS */
+.stButton > button {
+    min-height: 48px;
+    border-radius: 10px;
+    font-weight: 750 !important;
+    font-size: 14px !important;
+    opacity: 1 !important;
+}
+
+/* PRIMARY BUTTON */
+.stButton > button[kind="primary"] {
+    background-color: #147D9B !important;
+    color: #FFFFFF !important;
+    border: none !important;
+}
+
+.stButton > button[kind="primary"] p,
+.stButton > button[kind="primary"] span,
+.stButton > button[kind="primary"] div {
+    color: #FFFFFF !important;
+    opacity: 1 !important;
+}
+
+.stButton > button[kind="primary"]:hover {
+    background-color: #105E78 !important;
+    color: #FFFFFF !important;
+}
+
+/* SECONDARY BUTTON */
+.stButton > button[kind="secondary"] {
+    background-color: #FFFFFF !important;
+    color: #18324B !important;
+    border: 1px solid #B8C9D8 !important;
+}
+
+.stButton > button[kind="secondary"] p,
+.stButton > button[kind="secondary"] span {
+    color: #18324B !important;
+}
+
+/* BUTTON DISABLED */
+.stButton > button:disabled {
+    opacity: 0.65 !important;
+    color: #FFFFFF !important;
+}
+
+/* IMAGE */
 div[data-testid="stImage"] img {
     border-radius: 10px;
 }
 
-.footer {
-    text-align: center;
-    color: #8192A3;
-    font-size: 12px;
-    padding: 20px 0;
+/* DIVIDER */
+hr {
+    border-color: #D5DEE7 !important;
 }
 
-hr {
-    border-color: #E3EAF1;
+/* FOOTER */
+.dental-footer {
+    text-align: center;
+    padding: 30px 15px;
+    margin-top: 35px;
+    background: #FFFFFF;
+    border: 1px solid #E4EBF2;
+    border-radius: 14px;
+    color: #607286 !important;
+    font-size: 12px;
+}
+
+.dental-footer .brand {
+    color: #176B87 !important;
+    font-size: 17px;
+    font-weight: 800;
+    letter-spacing: 2px;
+    margin-bottom: 12px;
+}
+
+.dental-footer .copyright {
+    color: #8192A3 !important;
+    margin-top: 18px;
 }
 
 </style>
 """)
-
 
 # ============================================================
 # 5. MODEL ARCHITECTURE
@@ -1036,7 +1133,11 @@ if uploaded_file is not None:
 
         with st.container(border=True):
 
-            st.markdown("### Original Dental X-Ray")
+            st.markdown(
+                "<h3 style='color:#142D46 !important;'>"
+                "Original Dental X-Ray</h3>",
+                unsafe_allow_html=True
+            )
 
             st.image(
                 image,
@@ -1052,8 +1153,10 @@ if uploaded_file is not None:
 
         with st.container(border=True):
 
-            st.markdown("### Preprocessed Dental X-Ray")
-
+            st.markdown(
+                "<h3 style='color:#142D46 !important;'>"
+                "Preprocessed Dental X-Ray</h3>",
+                unsafe_allow_html=True
             st.image(
                 processed_preview,
                 width="stretch"
