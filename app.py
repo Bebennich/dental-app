@@ -1007,8 +1007,6 @@ with st.sidebar:
 
     st.markdown("### ⚙️ System Status")
 
-    st.success("Model Loaded")
-
     st.caption(f"Device: {DEVICE}")
 
     st.caption("Model: Xception Multi-task")
