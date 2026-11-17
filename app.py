@@ -104,6 +104,11 @@ render_html("""
     color: #42566B;
 }
 
+.stSuccess{
+    color: #142D46 !important;
+    opacity: 1 !important;
+}
+
 /* HEADINGS */
 .stApp h1,
 .stApp h2,
@@ -1007,9 +1012,11 @@ with st.sidebar:
 
     st.markdown("### ⚙️ System Status")
 
-    st.caption(f"Device: {DEVICE}")
+    st.success("Model Loaded")
 
-    st.caption("Model: Xception Multi-task")
+    st.markdown(f"Device: {DEVICE}")
+
+    st.markdown("Model: Xception Multi-task")
 
     st.divider()
 
