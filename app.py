@@ -1007,11 +1007,7 @@ with st.sidebar:
 
     st.markdown("### ⚙️ System Status")
 
-    st.success(
-       "<h3 style='color:#142D46 !important;'>"
-        "Model Loaded",
-        unsafe_allow_html=True
-    )
+    st.success("Model Loaded")()
 
     st.markdown(f"Device: {DEVICE}")
 
@@ -1022,7 +1018,7 @@ with st.sidebar:
     render_html("""
     <div style="
         text-align:center;
-        color:#B7D3E3;
+        color:#B7D3E3;x
         font-size:11px;
         padding:15px;">
         Academic Research Prototype
