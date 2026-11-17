@@ -1007,7 +1007,7 @@ with st.sidebar:
 
     st.markdown("### ⚙️ System Status")
 
-    st.success("Model Loaded")()
+    st.success("Model Loaded")
 
     st.markdown(f"Device: {DEVICE}")
 
